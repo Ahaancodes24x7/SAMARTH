@@ -2,6 +2,7 @@
 
 from fastapi import FastAPI, HTTPException
 from datetime import datetime
+from math import isfinite
 from typing import Dict, List
 
 from app.schemas.schemas import (
@@ -9,7 +10,7 @@ from app.schemas.schemas import (
     AssessmentAttemptEvent, LearnerCompetencyStateResponse,
 )
 from app.services.competency.mastery import AssessmentEvent
-from app.services.competency.state_engine import CompetencyStateEngine
+from app.services.competency.state_engine import CompetencyStateEngine, _resolve_graph_competency_id
 
 app = FastAPI(
     title="SkillCompass — Competency State & Gap Engine",
@@ -49,7 +50,17 @@ def create_learner(event: OnboardingEvent):
 
 @app.post("/roles/assign", status_code=200)
 def assign_role(event: RoleAssignmentEvent):
-    reqs = {r.competency_id: r.required_level for r in event.requirements}
+    reqs = {}
+    for requirement in event.requirements:
+        try:
+            competency_id = _resolve_graph_competency_id(requirement.competency_id)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not isfinite(requirement.required_level) or not 1.0 <= requirement.required_level <= 5.0:
+            raise HTTPException(status_code=400, detail="required_level must be between 1.0 and 5.0")
+        if competency_id in reqs:
+            raise HTTPException(status_code=400, detail=f"Duplicate competency_id: {competency_id}")
+        reqs[competency_id] = requirement.required_level
     store.add_role(event.role, reqs)
     if event.user_id in store.learners:
         store.learners[event.user_id]["role"] = event.role
@@ -66,17 +77,21 @@ def record_course_completion(event: CourseCompletionEvent):
 @app.post("/assessment-attempts", status_code=201)
 def record_assessment_attempt(event: AssessmentAttemptEvent):
     store.ensure_learner(event.user_id)
+    try:
+        competency_id = _resolve_graph_competency_id(event.competency_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     store.events[event.user_id].append(
         AssessmentEvent(
             question_id=event.question_id,
-            competency_id=event.competency_id,
+            competency_id=competency_id,
             difficulty=event.difficulty,
             correct=event.correct,
             timestamp=event.timestamp,
             learning_opportunity=event.learning_opportunity,
         )
     )
-    return {"status": "recorded", "user_id": event.user_id, "competency_id": event.competency_id}
+    return {"status": "recorded", "user_id": event.user_id, "competency_id": competency_id}
 
 
 @app.get("/learners/{user_id}/competency-state", response_model=LearnerCompetencyStateResponse)

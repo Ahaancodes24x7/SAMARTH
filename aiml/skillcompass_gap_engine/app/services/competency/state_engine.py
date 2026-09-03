@@ -18,6 +18,8 @@ OUTPUT: a CompetencyState object per competency, an explainable JSON
 """
 
 from dataclasses import dataclass, asdict
+from pathlib import Path
+import sys
 from typing import Dict, List
 from datetime import datetime
 
@@ -25,6 +27,18 @@ from .mastery import AssessmentEvent, BKTParams
 from .gap import compute_gap_for_competency, CompetencyGapResult
 from .confidence import ConfidenceWeights
 from .recency import DecayParams
+
+
+def _resolve_graph_competency_id(competency_id: str) -> str:
+    try:
+        from aiml.competency_graph.graph_loader import resolve_competency_id
+    except ModuleNotFoundError:
+        repo_root = Path(__file__).resolve().parents[5]
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+        from aiml.competency_graph.graph_loader import resolve_competency_id
+
+    return resolve_competency_id(competency_id)
 
 
 @dataclass
@@ -83,17 +97,33 @@ class LearnerCompetencyState:
         seed set until more evidence exists, so the recommender doesn't
         propagate priority from a shaky signal.
         """
-        seeds = [
-            {
-                "competency_id": c.competency_id,
+        seeds = []
+        diagnostic_gaps = []
+        seen = set()
+        for c in self.competencies:
+            canonical_id = _resolve_graph_competency_id(c.competency_id)
+            if canonical_id in seen:
+                raise ValueError(f"Duplicate competency_id in PPR seed export: {canonical_id!r}")
+            seen.add(canonical_id)
+            item = {
+                "competency_id": canonical_id,
                 "gap": c.gap,
                 "confidence": c.confidence,
                 "priority_weight": c.priority_weight,
+                "evidence_count": c.evidence_count,
+                "status": c.status,
             }
-            for c in self.competencies
-            if c.status == "CONFIRMED_GAP" and c.priority_weight > 0
-        ]
-        return {"learner_id": self.learner_id, "open_gaps": seeds}
+            if canonical_id != c.competency_id:
+                item["legacy_competency_id"] = c.competency_id
+            if c.gap > 0 and c.status == "CONFIRMED_GAP" and c.priority_weight > 0:
+                seeds.append(item)
+            elif c.gap > 0 and (c.evidence_count == 0 or c.needs_more_evidence):
+                diagnostic_gaps.append(item)
+        return {
+            "learner_id": self.learner_id,
+            "open_gaps": seeds,
+            "diagnostic_gaps": diagnostic_gaps,
+        }
 
     def ranked_gaps(self) -> List[CompetencyGapResult]:
         """Highest priority_weight first — this IS the ranking shown as

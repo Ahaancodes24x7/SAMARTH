@@ -7,6 +7,24 @@ the frontend, the RAG/MCQ generator, or the PPR recommendation engine —
 see `PART 16` in the design doc for exactly what this module exports for
 those to consume later.
 
+## PS 26101 competency vocabulary
+
+The AIML graph uses the actual PS 26101 competency list as its canonical
+registry. It contains 33 competencies across Statistical, Technical, Digital
+Governance, and Behavioural / Managerial domains. Role profiles such as
+`district_stat_officer`, `senior_stat_officer`, and `data_analyst` are MVP
+archetypes only; they are not claimed to be an exhaustive or official PS job
+title list.
+
+Legacy demo IDs are migrated explicitly by the graph loader:
+
+```text
+sdg_indicator_estimation -> sdg_indicators
+data_quality             -> data_quality_frameworks
+python_basics            -> python
+gis_fundamentals         -> gis
+```
+
 Everything in this README that looks like output was actually run, not
 written from imagination — see the "Verified" markers below.
 
@@ -28,7 +46,7 @@ cd skillcompass_gap_engine
 pip install -r requirements.txt --break-system-packages
 ```
 
-## Run the tests — [VERIFIED: 30/30 passed on actual execution]
+## Run the tests - [VERIFIED: 25/25 passed on actual execution]
 
 ```bash
 python3 -m pytest tests/ -v
@@ -37,7 +55,7 @@ python3 -m pytest tests/ -v
 Real output from an actual run of this exact codebase:
 
 ```
-30 passed in 0.05s
+25 passed in 1.82s
 ```
 
 Two bugs were caught and fixed by actually running this suite during
@@ -120,10 +138,23 @@ curl -X POST localhost:8000/assessment-attempts -H "Content-Type: application/js
 curl localhost:8000/learners/OFF_001/competency-state
 ```
 
+## Graph recommendation contract
+
+The gap engine's `to_ppr_seed_export()` now emits canonical graph IDs only.
+Confirmed gaps appear under `open_gaps`; low-confidence or no-evidence positive
+gaps appear under `diagnostic_gaps` so the graph recommender can distinguish
+confirmed learning priorities from diagnostic-needed states.
+
+The graph recommendation engine lives in `aiml/competency_graph/recommender.py`.
+It uses NetworkX PageRank on the reversed prerequisite graph. This means
+`sampling -> sdg_indicators` is interpreted correctly: an `sdg_indicators` gap
+can surface upstream prerequisites such as `sampling`, while a `sampling` gap
+does not leak downstream into `sdg_indicators`.
+
 ## Sample end-to-end output — [VERIFIED: real output from the actual engine, fictional learner]
 
 A fictional "Anjali" scenario (weak in Sampling, strong in Survey Design,
-zero evidence yet in SDG Indicator Estimation — a cold-start case):
+zero evidence yet in SDG Indicators - a cold-start case):
 
 ```json
 {
@@ -159,7 +190,7 @@ zero evidence yet in SDG Indicator Estimation — a cold-start case):
       "reason": "Evidence indicates the learner meets or exceeds the role-required level."
     },
     {
-      "competency": "sdg_indicator_estimation",
+      "competency": "sdg_indicators",
       "required_level": 3.0,
       "raw_mastery": 2.2,
       "confidence": 0.0,
@@ -182,12 +213,12 @@ highest-priority gap" means in the demo, computed deterministically):
 ```
 sampling                       priority_weight=0.275  gap=2.24
 survey_design                  priority_weight=0.000  gap=-0.84
-sdg_indicator_estimation       priority_weight=0.000  gap=0.80
+sdg_indicators                 priority_weight=0.000  gap=0.80
 ```
 
 PPR seed export (what the future graph engine will consume — note
 `survey_design` is excluded because its gap is negative, and this
-particular `sdg_indicator_estimation` case happens to fall under the
+particular `sdg_indicators` case happens to fall under the
 seed-inclusion gap/confidence conditions in `gap.py`; adjust thresholds
 there if your own scenario should behave differently):
 
@@ -196,7 +227,7 @@ there if your own scenario should behave differently):
   "learner_id": "OFF_001_FICTIONAL",
   "open_gaps": [
     {"competency_id": "sampling", "gap": 2.2396, "confidence": 0.4912, "priority_weight": 0.275},
-    {"competency_id": "sdg_indicator_estimation", "gap": 0.8, "confidence": 0.0, "priority_weight": 0.0}
+    {"competency_id": "sdg_indicators", "gap": 0.8, "confidence": 0.0, "priority_weight": 0.0}
   ]
 }
 ```

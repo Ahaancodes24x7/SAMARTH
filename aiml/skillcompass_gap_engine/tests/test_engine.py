@@ -200,15 +200,29 @@ class TestGapCalculation:
 
     def test_ppr_seed_excludes_uncertain_zero_gap_and_stale(self):
         engine = CompetencyStateEngine()
-        required = {"uncertain": 4.5, "zero": 2.0, "stale": 4.0, "confirmed": 4.5}
+        required = {
+            "sampling": 4.5,
+            "survey_design": 2.0,
+            "sdg_indicators": 4.0,
+            "data_quality_frameworks": 4.5,
+        }
         events = [
-            ev("u1", "uncertain", False),
-            *[ev(f"z{i}", "zero", True) for i in range(12)],
-            *[ev(f"s{i}", "stale", False, days_ago=180) for i in range(12)],
-            *[ev(f"c{i}", "confirmed", False, difficulty=["easy", "medium", "hard"][i % 3]) for i in range(18)],
+            ev("u1", "sampling", False),
+            *[ev(f"z{i}", "survey_design", True) for i in range(12)],
+            *[ev(f"s{i}", "sdg_indicators", False, days_ago=180) for i in range(12)],
+            *[
+                ev(
+                    f"c{i}",
+                    "data_quality_frameworks",
+                    False,
+                    difficulty=["easy", "medium", "hard"][i % 3],
+                )
+                for i in range(18)
+            ],
         ]
         export = engine.compute_state("u", required, events, now=NOW).to_ppr_seed_export()
-        assert [item["competency_id"] for item in export["open_gaps"]] == ["confirmed"]
+        assert [item["competency_id"] for item in export["open_gaps"]] == ["data_quality_frameworks"]
+        assert export["diagnostic_gaps"][0]["competency_id"] == "sampling"
 
 
 class TestSynthetic:
